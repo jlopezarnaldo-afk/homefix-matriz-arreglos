@@ -3,6 +3,7 @@ import { Wrench, CheckCircle2, ListTodo, RotateCcw, Trash2, Cloud, CloudOff } fr
 import type { Task, ComputedTask, RoomId, PaymentMode } from './types/task';
 import { enrichTask } from './services/prioritizer';
 import { storageService, generateUUID } from './services/storage';
+import { supabase } from './services/supabase';
 import { QuickAddBar } from './components/QuickAddBar';
 import { PendingView } from './components/PendingView';
 import { ResolvedView } from './components/ResolvedView';
@@ -83,7 +84,27 @@ export const App: React.FC = () => {
       window.addEventListener('offline', handleOffline);
     }
 
+    // Realtime listener for instantaneous multi-device synchronization
+    const channel = supabase
+      .channel('homefix-realtime-sync')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders'
+        },
+        (payload: any) => {
+          const rec = payload.new || payload.old;
+          if (rec && (rec.client_phone === 'HOMEFIX' || rec.id?.startsWith('homefix_'))) {
+            loadTasks();
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
+      supabase.removeChannel(channel);
       if (typeof window !== 'undefined') {
         window.removeEventListener('online', handleOnline);
         window.removeEventListener('offline', handleOffline);

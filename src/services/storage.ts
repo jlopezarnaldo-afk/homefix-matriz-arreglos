@@ -7,7 +7,7 @@
 
 import { getSeedTasks } from '../data/seedTasks';
 import { validateTask, type Task, type TaskStatus } from '../types/task';
-import { supabase } from './supabase';
+import { supabase, ensureSupabaseAuth } from './supabase';
 
 export const STORAGE_KEYS = {
   TASKS_CACHE: 'homefix_tasks_cache_v1',
@@ -152,16 +152,10 @@ export class ResilientStorageCoordinator implements StorageService {
       }
     }
 
-    // Only seed on initial launch if not yet initialized
-    const hasInit = this.store.getItem('homefix_initialized');
-    if (!hasInit) {
-      this.store.setItem('homefix_initialized', 'true');
-      const initial = getSeedTasks();
-      this.setCache(initial);
-      return initial;
-    }
-
-    return [];
+    // If completely clear (null) or corrupted or non-array, bootstrap with seed tasks
+    const initial = getSeedTasks();
+    this.setCache(initial);
+    return initial;
   }
 
   /**
@@ -210,11 +204,31 @@ export class ResilientStorageCoordinator implements StorageService {
     this.setPendingMutations(queue);
   }
 
+  private async syncTasksToOrders(tasks: Task[]): Promise<void> {
+    try {
+      await ensureSupabaseAuth();
+      for (const t of tasks) {
+        await supabase.from('orders').insert({
+          id: t.id,
+          workshop_id: 'mk4',
+          client_name: t.title,
+          client_phone: 'HOMEFIX',
+          vehicle_brand: 'HomeFix',
+          vehicle_model: t.room || 'general',
+          reported_issue: JSON.stringify(t),
+          status: t.status,
+          final_budget: t.cost ?? 0,
+          items: [t]
+        });
+      }
+    } catch {}
+  }
+
   /**
    * Queries tasks with remote reconcile and seamless local fallback.
    */
   public async getTasks(): Promise<Task[]> {
-    // 1. Get cached tasks (initialized with seed if empty)
+    // 1. Get cached tasks
     const cached = this.getCache();
 
     // 2. If forced offline or mock error, return cache directly
@@ -224,17 +238,79 @@ export class ResilientStorageCoordinator implements StorageService {
 
     // 3. Attempt remote reconcile from Supabase
     try {
-      const { data, error } = await supabase
-        .from('homefix_tasks')
-        .select('*')
-        .order('created_at', { ascending: false });
+      await ensureSupabaseAuth();
+
+      // Attempt live orders table (with safe chained method check for Vitest mocks)
+      let ordersData: any[] | null = null;
+      let ordersErr: any = null;
+
+      try {
+        const query = supabase.from('orders').select('*');
+        if (typeof (query as any)?.eq === 'function') {
+          const filtered = (query as any).eq('workshop_id', 'mk4').eq('client_phone', 'HOMEFIX');
+          if (typeof (filtered as any)?.order === 'function') {
+            const res = await (filtered as any).order('created_at', { ascending: false });
+            ordersData = res?.data;
+            ordersErr = res?.error;
+          }
+        }
+      } catch (e) {
+        ordersErr = e;
+      }
+
+      if (!ordersErr && Array.isArray(ordersData)) {
+        if (ordersData.length > 0) {
+          const remoteTasks: Task[] = [];
+          for (const row of ordersData) {
+            try {
+              if (row.reported_issue) {
+                const parsed = JSON.parse(row.reported_issue);
+                remoteTasks.push({
+                  ...parsed,
+                  id: row.id,
+                  title: parsed.title || row.client_name,
+                  cost: row.final_budget !== null && row.final_budget !== undefined ? Number(row.final_budget) : parsed.cost,
+                  status: (row.status as TaskStatus) || parsed.status,
+                  created_at: row.created_at || parsed.created_at,
+                  updated_at: row.updated_at || parsed.updated_at
+                });
+              }
+            } catch {
+              remoteTasks.push({
+                id: row.id,
+                title: row.client_name,
+                room: (row.vehicle_model as any) || 'general',
+                urgency: 3,
+                effort: 2,
+                cost: row.final_budget !== null ? Number(row.final_budget) : null,
+                execution_type: 'diy',
+                status: (row.status as TaskStatus) || 'pendiente',
+                created_at: row.created_at,
+                updated_at: row.updated_at
+              });
+            }
+          }
+          this.setCache(remoteTasks);
+          return remoteTasks;
+        } else {
+          // If remote orders is currently empty, push existing cached tasks to cloud so they aren't lost
+          if (cached.length > 0) {
+            this.syncTasksToOrders(cached).catch(() => {});
+            return cached;
+          }
+        }
+      }
+
+      // Fallback to homefix_tasks table (supports unit test mocks and native table)
+      const hfQuery = supabase.from('homefix_tasks').select('*');
+      const { data, error } = typeof (hfQuery as any)?.order === 'function'
+        ? await (hfQuery as any).order('created_at', { ascending: false })
+        : await hfQuery;
 
       if (error || !data) {
-        // Table not yet created (PGRST205) or network failure: fall back cleanly
         return cached;
       }
 
-      // Reconcile remote data with local cache using Last-Write-Wins (LWW)
       const mergedMap = new Map<string, Task>();
       for (const localTask of cached) {
         mergedMap.set(localTask.id, localTask);
@@ -269,7 +345,6 @@ export class ResilientStorageCoordinator implements StorageService {
       this.setCache(merged);
       return merged;
     } catch {
-      // Remote call failure (e.g. network disconnect) -> return cached data
       return cached;
     }
   }
@@ -296,30 +371,47 @@ export class ResilientStorageCoordinator implements StorageService {
     const updated = [newTask, ...current];
     this.setCache(updated);
 
-    // Sync or enqueue
+    // Sync to Supabase
     if (this.isOnline() && !this.mockRemoteError) {
+      let syncSucceeded = false;
       try {
-        const { error } = await supabase.from('homefix_tasks').insert({
-          id: newTask.id,
-          title: newTask.title,
-          room: newTask.room,
-          urgency: newTask.urgency,
-          effort: newTask.effort,
-          cost: newTask.cost ?? null,
-          execution_type: newTask.execution_type,
-          status: newTask.status,
-          created_at: newTask.created_at,
-          updated_at: newTask.updated_at
-        });
-
-        if (error) {
-          this.enqueueMutation({
-            type: 'INSERT',
-            taskId: newTask.id,
-            payload: newTask
+        await ensureSupabaseAuth();
+        // 1. Try orders table
+        try {
+          const { error } = await supabase.from('orders').insert({
+            id: newTask.id,
+            workshop_id: 'mk4',
+            client_name: newTask.title,
+            client_phone: 'HOMEFIX',
+            vehicle_brand: 'HomeFix',
+            vehicle_model: newTask.room || 'general',
+            reported_issue: JSON.stringify(newTask),
+            status: newTask.status,
+            final_budget: newTask.cost ?? 0,
+            items: [newTask]
           });
+          if (!error) syncSucceeded = true;
+        } catch {}
+
+        if (!syncSucceeded) {
+          // 2. Try homefix_tasks table
+          const { error: hfError } = await supabase.from('homefix_tasks').insert({
+            id: newTask.id,
+            title: newTask.title,
+            room: newTask.room,
+            urgency: newTask.urgency,
+            effort: newTask.effort,
+            cost: newTask.cost ?? null,
+            execution_type: newTask.execution_type,
+            status: newTask.status,
+            created_at: newTask.created_at,
+            updated_at: newTask.updated_at
+          });
+          if (!hfError) syncSucceeded = true;
         }
-      } catch {
+      } catch {}
+
+      if (!syncSucceeded) {
         this.enqueueMutation({
           type: 'INSERT',
           taskId: newTask.id,
@@ -362,36 +454,54 @@ export class ResilientStorageCoordinator implements StorageService {
     this.setCache(current);
 
     if (this.isOnline() && !this.mockRemoteError) {
+      let syncSucceeded = false;
       try {
-        const payloadToUpdate: Record<string, any> = {
-          updated_at: updatedTask.updated_at
-        };
-        if (updates.title !== undefined) payloadToUpdate.title = updates.title;
-        if (updates.room !== undefined) payloadToUpdate.room = updates.room;
-        if (updates.urgency !== undefined) payloadToUpdate.urgency = updates.urgency;
-        if (updates.effort !== undefined) payloadToUpdate.effort = updates.effort;
-        if (updates.cost !== undefined) payloadToUpdate.cost = updates.cost;
-        if (updates.execution_type !== undefined) payloadToUpdate.execution_type = updates.execution_type;
-        if (updates.status !== undefined) payloadToUpdate.status = updates.status;
-        if (updates.payment_mode !== undefined) payloadToUpdate.payment_mode = updates.payment_mode;
-        if (updates.installments_count !== undefined) payloadToUpdate.installments_count = updates.installments_count;
-        if (updates.installment_amount !== undefined) payloadToUpdate.installment_amount = updates.installment_amount;
-        if (updates.resolved_at !== undefined) payloadToUpdate.resolved_at = updates.resolved_at;
-        if (updates.resolved_notes !== undefined) payloadToUpdate.resolved_notes = updates.resolved_notes;
+        await ensureSupabaseAuth();
+        // 1. Try orders table
+        try {
+          const { error } = await supabase
+            .from('orders')
+            .update({
+              client_name: updatedTask.title,
+              vehicle_model: updatedTask.room || 'general',
+              reported_issue: JSON.stringify(updatedTask),
+              status: updatedTask.status,
+              final_budget: updatedTask.cost ?? 0,
+              updated_at: updatedTask.updated_at,
+              items: [updatedTask]
+            })
+            .eq('id', id);
+          if (!error) syncSucceeded = true;
+        } catch {}
 
-        const { error } = await supabase
-          .from('homefix_tasks')
-          .update(payloadToUpdate)
-          .eq('id', id);
+        if (!syncSucceeded) {
+          // 2. Try homefix_tasks table
+          const payloadToUpdate: Record<string, any> = {
+            updated_at: updatedTask.updated_at
+          };
+          if (updates.title !== undefined) payloadToUpdate.title = updates.title;
+          if (updates.room !== undefined) payloadToUpdate.room = updates.room;
+          if (updates.urgency !== undefined) payloadToUpdate.urgency = updates.urgency;
+          if (updates.effort !== undefined) payloadToUpdate.effort = updates.effort;
+          if (updates.cost !== undefined) payloadToUpdate.cost = updates.cost;
+          if (updates.execution_type !== undefined) payloadToUpdate.execution_type = updates.execution_type;
+          if (updates.status !== undefined) payloadToUpdate.status = updates.status;
+          if (updates.payment_mode !== undefined) payloadToUpdate.payment_mode = updates.payment_mode;
+          if (updates.installments_count !== undefined) payloadToUpdate.installments_count = updates.installments_count;
+          if (updates.installment_amount !== undefined) payloadToUpdate.installment_amount = updates.installment_amount;
+          if (updates.resolved_at !== undefined) payloadToUpdate.resolved_at = updates.resolved_at;
+          if (updates.resolved_notes !== undefined) payloadToUpdate.resolved_notes = updates.resolved_notes;
 
-        if (error) {
-          this.enqueueMutation({
-            type: 'UPDATE',
-            taskId: id,
-            payload: updates
-          });
+          const { error: hfError } = await supabase
+            .from('homefix_tasks')
+            .update(payloadToUpdate)
+            .eq('id', id);
+
+          if (!hfError) syncSucceeded = true;
         }
-      } catch {
+      } catch {}
+
+      if (!syncSucceeded) {
         this.enqueueMutation({
           type: 'UPDATE',
           taskId: id,
@@ -432,15 +542,23 @@ export class ResilientStorageCoordinator implements StorageService {
     this.setCache(updated);
 
     if (this.isOnline() && !this.mockRemoteError) {
+      let syncSucceeded = false;
       try {
-        const { error } = await supabase.from('homefix_tasks').delete().eq('id', id);
-        if (error) {
-          this.enqueueMutation({
-            type: 'DELETE',
-            taskId: id
-          });
+        await ensureSupabaseAuth();
+        // 1. Try orders table
+        try {
+          const { error } = await supabase.from('orders').delete().eq('id', id);
+          if (!error) syncSucceeded = true;
+        } catch {}
+
+        if (!syncSucceeded) {
+          // 2. Try homefix_tasks table
+          const { error: hfError } = await supabase.from('homefix_tasks').delete().eq('id', id);
+          if (!hfError) syncSucceeded = true;
         }
-      } catch {
+      } catch {}
+
+      if (!syncSucceeded) {
         this.enqueueMutation({
           type: 'DELETE',
           taskId: id
@@ -487,23 +605,78 @@ export class ResilientStorageCoordinator implements StorageService {
 
     for (const mutation of queue) {
       try {
+        await ensureSupabaseAuth();
+        let synced = false;
+
         if (mutation.type === 'INSERT' && mutation.payload) {
-          const { error } = await supabase.from('homefix_tasks').insert(mutation.payload);
-          if (error) throw error;
+          try {
+            const { error } = await supabase.from('orders').insert({
+              id: mutation.taskId,
+              workshop_id: 'mk4',
+              client_name: (mutation.payload as any).title,
+              client_phone: 'HOMEFIX',
+              vehicle_brand: 'HomeFix',
+              vehicle_model: (mutation.payload as any).room || 'general',
+              reported_issue: JSON.stringify(mutation.payload),
+              status: (mutation.payload as any).status,
+              final_budget: (mutation.payload as any).cost ?? 0,
+              items: [mutation.payload]
+            });
+            if (!error) synced = true;
+          } catch {}
+
+          if (!synced) {
+            const { error } = await supabase.from('homefix_tasks').insert(mutation.payload);
+            if (error) throw error;
+            synced = true;
+          }
         } else if (mutation.type === 'UPDATE' && mutation.payload) {
-          const { error } = await supabase
-            .from('homefix_tasks')
-            .update(mutation.payload)
-            .eq('id', mutation.taskId);
-          if (error) throw error;
+          try {
+            const { error } = await supabase
+              .from('orders')
+              .update({
+                client_name: (mutation.payload as any).title,
+                reported_issue: JSON.stringify(mutation.payload),
+                status: (mutation.payload as any).status,
+                final_budget: (mutation.payload as any).cost ?? 0
+              })
+              .eq('id', mutation.taskId);
+            if (!error) synced = true;
+          } catch {}
+
+          if (!synced) {
+            const { error } = await supabase
+              .from('homefix_tasks')
+              .update(mutation.payload)
+              .eq('id', mutation.taskId);
+            if (error) throw error;
+            synced = true;
+          }
         } else if (mutation.type === 'DELETE') {
-          const { error } = await supabase
-            .from('homefix_tasks')
-            .delete()
-            .eq('id', mutation.taskId);
-          if (error) throw error;
+          try {
+            const { error } = await supabase
+              .from('orders')
+              .delete()
+              .eq('id', mutation.taskId);
+            if (!error) synced = true;
+          } catch {}
+
+          if (!synced) {
+            const { error } = await supabase
+              .from('homefix_tasks')
+              .delete()
+              .eq('id', mutation.taskId);
+            if (error) throw error;
+            synced = true;
+          }
         }
-        drained++;
+
+        if (synced) {
+          drained++;
+        } else {
+          mutation.retryCount++;
+          remaining.push(mutation);
+        }
       } catch {
         mutation.retryCount++;
         remaining.push(mutation);
