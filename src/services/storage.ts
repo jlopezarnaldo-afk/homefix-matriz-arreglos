@@ -350,6 +350,11 @@ export class ResilientStorageCoordinator implements StorageService {
         if (updates.cost !== undefined) payloadToUpdate.cost = updates.cost;
         if (updates.execution_type !== undefined) payloadToUpdate.execution_type = updates.execution_type;
         if (updates.status !== undefined) payloadToUpdate.status = updates.status;
+        if (updates.payment_mode !== undefined) payloadToUpdate.payment_mode = updates.payment_mode;
+        if (updates.installments_count !== undefined) payloadToUpdate.installments_count = updates.installments_count;
+        if (updates.installment_amount !== undefined) payloadToUpdate.installment_amount = updates.installment_amount;
+        if (updates.resolved_at !== undefined) payloadToUpdate.resolved_at = updates.resolved_at;
+        if (updates.resolved_notes !== undefined) payloadToUpdate.resolved_notes = updates.resolved_notes;
 
         const { error } = await supabase
           .from('homefix_tasks')

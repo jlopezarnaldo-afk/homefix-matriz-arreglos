@@ -12,15 +12,22 @@ export type PriorityLevel = 'P1' | 'P2' | 'P3' | 'P4';
 export type PriorityCategory = PriorityLevel;
 export type QuadrantId = 'Q1' | 'Q2' | 'Q3' | 'Q4';
 
+export type PaymentMode = 'un_pago' | 'cuotas';
+
 export interface Task {
   id: string;
   title: string;
   room: RoomId;
-  urgency: number; // 1 to 5
+  urgency: number; // 1 to 5 (1=Baja, 3=Media, 5=Urgente)
   effort: number;  // 1 to 5
   cost?: number | null;
   execution_type: ExecutionType;
   status: TaskStatus;
+  payment_mode?: PaymentMode | null;
+  installments_count?: number | null;
+  installment_amount?: number | null;
+  resolved_at?: string | null;
+  resolved_notes?: string | null;
   created_at?: string;
   updated_at?: string;
 }

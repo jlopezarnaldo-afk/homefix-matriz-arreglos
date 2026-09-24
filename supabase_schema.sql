@@ -17,9 +17,21 @@ create table if not exists public.homefix_tasks (
     cost numeric(10, 2) check (cost is null or cost >= 0),
     execution_type text not null check (execution_type in ('diy', 'profesional')),
     status text not null default 'pendiente' check (status in ('pendiente', 'en_proceso', 'listo')),
+    payment_mode text check (payment_mode is null or payment_mode in ('un_pago', 'cuotas')),
+    installments_count int check (installments_count is null or installments_count >= 1),
+    installment_amount numeric(10, 2) check (installment_amount is null or installment_amount >= 0),
+    resolved_at timestamptz,
+    resolved_notes text,
     created_at timestamptz not null default timezone('utc'::text, now()),
     updated_at timestamptz not null default timezone('utc'::text, now())
 );
+
+-- Support adding columns if table already existed
+alter table public.homefix_tasks add column if not exists payment_mode text check (payment_mode is null or payment_mode in ('un_pago', 'cuotas'));
+alter table public.homefix_tasks add column if not exists installments_count int check (installments_count is null or installments_count >= 1);
+alter table public.homefix_tasks add column if not exists installment_amount numeric(10, 2) check (installment_amount is null or installment_amount >= 0);
+alter table public.homefix_tasks add column if not exists resolved_at timestamptz;
+alter table public.homefix_tasks add column if not exists resolved_notes text;
 
 -- 3. Optimization Indexes for Multi-Filtering and Priority Sorting
 create index if not exists idx_homefix_tasks_status on public.homefix_tasks (status);
