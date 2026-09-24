@@ -63,11 +63,11 @@ HomeFix is an interactive Single Page Application (SPA) designed to catalog, eva
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Project Scaffolding & Tooling | Declarative project files, Vite + React + Tailwind + Lucide setup, Git repo & .gitignore, vercel.json | none | IN_PROGRESS |
-| M2 | Data Engine & Resilient Storage | Data model, prioritization algorithm, seed tasks, Supabase client + offline fallback, supabase_schema.sql, unit tests | M1 | PLANNED |
-| M3 | UI Views & Responsive Matrix | App layout, Navbar, 2x2 Matrix (desktop grid + mobile tabs), List view with live filters, Task modal/form, card actions | M2 | PLANNED |
+| M1 | Project Scaffolding & Tooling | Declarative project files, Vite + React + Tailwind + Lucide setup, Git repo & .gitignore, vercel.json | none | DONE |
+| M2 | Data Engine & Resilient Storage | Data model, prioritization algorithm, seed tasks, Supabase client + offline fallback, supabase_schema.sql, unit tests | M1 | DONE |
+| M3 | UI Views & Responsive Matrix | App layout, Navbar, 2x2 Matrix (desktop grid + mobile tabs), List view with live filters, Task modal/form, card actions | M2 | IN_PROGRESS |
 | M4 | Final Integration & E2E Pass | 100% E2E test pass, clean build verification, Tier 5 adversarial hardening | M3, E2E | PLANNED |
-| E2E | E2E Testing Suite (Parallel Track) | Test runner harness, Tiers 1-4 test cases, TEST_READY.md publication | M1 | IN_PROGRESS |
+| E2E | E2E Testing Suite (Parallel Track) | Test runner harness, Tiers 1-4 test cases, TEST_READY.md publication | M1 | DONE |
 
 ## Interface Contracts
 
