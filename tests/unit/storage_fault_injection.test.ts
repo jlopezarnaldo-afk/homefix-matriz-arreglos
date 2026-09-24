@@ -440,11 +440,11 @@ describe('Storage Service Fault Injection & Resilience Testing', () => {
       expect(parsed.length).toBe(SEED_TASKS.length);
     });
 
-    it('bootstraps with SEED_TASKS when cache is empty array "[]"', async () => {
+    it('preserves empty array "[]" when cache is deliberately cleared', async () => {
       mockStorage.setItem(STORAGE_KEYS.TASKS_CACHE, '[]');
 
       const tasks = await storageService.getTasks();
-      expect(tasks.length).toBe(SEED_TASKS.length);
+      expect(tasks.length).toBe(0);
     });
 
     it('recovers and bootstraps with SEED_TASKS when localStorage contains corrupted JSON', async () => {

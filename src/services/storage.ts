@@ -128,32 +128,50 @@ export class ResilientStorageCoordinator implements StorageService {
    */
   public getCache(): Task[] {
     const raw = this.store.getItem(STORAGE_KEYS.TASKS_CACHE);
-    if (!raw) {
+    if (raw !== null) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      } catch {}
+    }
+
+    // Check backup keys to rescue any existing user tasks
+    const backupKeys = ['homefix_permanent_tasks', 'homefix_tasks', 'homefix_tasks_backup'];
+    for (const key of backupKeys) {
+      const backupRaw = this.store.getItem(key);
+      if (backupRaw) {
+        try {
+          const parsed = JSON.parse(backupRaw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.setCache(parsed);
+            return parsed;
+          }
+        } catch {}
+      }
+    }
+
+    // Only seed on initial launch if not yet initialized
+    const hasInit = this.store.getItem('homefix_initialized');
+    if (!hasInit) {
+      this.store.setItem('homefix_initialized', 'true');
       const initial = getSeedTasks();
       this.setCache(initial);
       return initial;
     }
 
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-      const initial = getSeedTasks();
-      this.setCache(initial);
-      return initial;
-    } catch {
-      const initial = getSeedTasks();
-      this.setCache(initial);
-      return initial;
-    }
+    return [];
   }
 
   /**
    * Persists tasks array into local cache.
    */
   public setCache(tasks: Task[]): void {
-    this.store.setItem(STORAGE_KEYS.TASKS_CACHE, JSON.stringify(tasks));
+    const serialized = JSON.stringify(tasks);
+    this.store.setItem(STORAGE_KEYS.TASKS_CACHE, serialized);
+    this.store.setItem('homefix_permanent_tasks', serialized);
+    this.store.setItem('homefix_initialized', 'true');
   }
 
   /**
@@ -232,6 +250,11 @@ export class ResilientStorageCoordinator implements StorageService {
           cost: remoteRow.cost !== null ? Number(remoteRow.cost) : null,
           execution_type: remoteRow.execution_type,
           status: remoteRow.status,
+          payment_mode: remoteRow.payment_mode || null,
+          installments_count: remoteRow.installments_count || null,
+          installment_amount: remoteRow.installment_amount !== null ? Number(remoteRow.installment_amount) : null,
+          resolved_at: remoteRow.resolved_at || null,
+          resolved_notes: remoteRow.resolved_notes || null,
           created_at: remoteRow.created_at,
           updated_at: remoteRow.updated_at
         };

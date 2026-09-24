@@ -26,6 +26,7 @@ export const App: React.FC = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
   const [taskToDelete, setTaskToDelete] = useState<ComputedTask | null>(null);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState<boolean>(false);
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState<boolean>(false);
 
   // Toasts
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -216,6 +217,14 @@ export const App: React.FC = () => {
     }
   };
 
+  // Clear all tasks to start fresh
+  const handleClearAll = async () => {
+    storageService.setCache([]);
+    setTasks([]);
+    addToast('Lista lista para tus propios arreglos', 'info');
+    setIsClearConfirmOpen(false);
+  };
+
   // Reset to seed
   const handleResetToSeed = async () => {
     try {
@@ -303,6 +312,15 @@ export const App: React.FC = () => {
                 </>
               )}
             </div>
+
+            <button
+              type="button"
+              onClick={() => setIsClearConfirmOpen(true)}
+              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+              title="Vaciar lista y empezar de cero"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
 
             <button
               type="button"
@@ -446,6 +464,43 @@ export const App: React.FC = () => {
                 className="py-2.5 px-4 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition-colors shadow-xs"
               >
                 Restablecer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Diálogo de Confirmación para Vaciar Lista */}
+      {isClearConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="relative w-full max-w-sm bg-white rounded-2xl p-6 shadow-2xl border border-slate-200 text-center">
+            <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-700 flex items-center justify-center mb-3 mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900 mb-1">
+              ¿Vaciar la lista actual?
+            </h3>
+            <p className="text-xs text-slate-600 mb-5 leading-relaxed">
+              Se limpiará la lista para que puedas empezar desde cero y cargar tus propios arreglos del hogar.
+            </p>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsClearConfirmOpen(false)}
+                className="py-2.5 px-4 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAll}
+                className="py-2.5 px-4 text-xs font-bold text-white bg-slate-900 hover:bg-black rounded-xl transition-colors shadow-xs"
+              >
+                Sí, vaciar
               </button>
             </div>
           </div>
