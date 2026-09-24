@@ -9,6 +9,7 @@ import { ResolvedView } from './components/ResolvedView';
 import { ResolveTaskModal } from './components/ResolveTaskModal';
 import { TaskModal } from './components/TaskModal';
 import { Toast, type ToastMessage, type ToastType } from './components/Toast';
+import { InstallAppBanner } from './components/InstallAppBanner';
 
 export const App: React.FC = () => {
   // Navigation: 'pendientes' | 'resueltos'
@@ -450,6 +451,9 @@ export const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* PWA Install Banner & Flow */}
+      <InstallAppBanner />
 
       {/* Toast Notifications */}
       <Toast toasts={toasts} onDismiss={dismissToast} />
