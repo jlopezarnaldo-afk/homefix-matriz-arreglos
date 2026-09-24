@@ -46,3 +46,7 @@ Thumbs.db
 # Temporary / Scratch files
 *.tmp
 *.bak
+
+# Multi-agent internal artifacts
+.agents/
+

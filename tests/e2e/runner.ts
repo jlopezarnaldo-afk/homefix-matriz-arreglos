@@ -17,6 +17,7 @@ import './tier1_features.test.ts';
 import './tier2_boundaries.test.ts';
 import './tier3_combinations.test.ts';
 import './tier4_real_world.test.ts';
+import './tier5_adversarial.test.ts';
 
 async function main() {
   try {
